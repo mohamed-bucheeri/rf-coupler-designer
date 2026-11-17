@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RF Coupler Designer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: an order form on the left, and on the right a component datasheet
+   generated for the student's own part: title block, spec table, schematic, parts list, curves. */
+:root {
+  --paper: #eef1ea; --surface: #fbfcf9; --sunk: #f3f5ef;
+  --ink: #131a16; --ink-2: #4a554f; --ink-3: #727d77; --rule: #d2d8cf;
+  --accent: #0d5f47; --accent-ink: #ffffff; --accent-soft: #dcece4;
+  --good: #0ca30c; --warn: #fab219; --serious: #ec835a; --crit: #d03b3b;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --f-display: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0e1210; --surface: #171c19; --sunk: #121614;
+    --ink: #e7ebe7; --ink-2: #aeb8b2; --ink-3: #828d87; --rule: #2c3530;
+    --accent: #5fd0a5; --accent-ink: #05241a; --accent-soft: #17352b;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0e1210; --surface: #171c19; --sunk: #121614;
+  --ink: #e7ebe7; --ink-2: #aeb8b2; --ink-3: #828d87; --rule: #2c3530;
+  --accent: #5fd0a5; --accent-ink: #05241a; --accent-soft: #17352b;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.5 var(--f-body); }
+h1, h2, h3, p, ul, ol, figure, fieldset { margin: 0; padding: 0; }
+fieldset { border: 0; min-width: 0; }
+a { color: var(--accent); }
+.mono, td.n, th.n { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; padding: 18px 24px 14px; border-bottom: 1px solid var(--rule); }
+.brand { font: 700 26px/1 var(--f-display); letter-spacing: .04em; text-transform: uppercase; }
+.brand span { color: var(--accent); }
+.top p { color: var(--ink-2); max-width: 70ch; }
+
+.grid { display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 24px; padding: 20px 24px 48px; max-width: 1440px; margin: 0 auto; align-items: start; }
+@media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); padding: 16px 16px 40px; } .top { padding: 16px; } }
+
+/* ---------- order form ---------- */
+.panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; display: flex; flex-direction: column; gap: 18px; }
+@media (min-width: 901px) { .panel { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; } }
+.panel h2 { font: 600 13px/1 var(--f-display); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
+.fld { display: flex; flex-direction: column; gap: 6px; }
+.fld > label, .fld > legend, .lab { font-weight: 600; font-size: 13.5px; }
+.hint { font-size: 12.5px; color: var(--ink-3); line-height: 1.4; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row.two > * { flex: 1 1 110px; }
+input[type=number], select {
+  font: 500 14px/1.2 var(--f-mono); color: var(--ink); background: var(--sunk); border: 1px solid var(--rule);
+  border-radius: 4px; padding: 7px 8px; width: 100%; min-width: 0;
+}
+input[type=number]:hover, select:hover { border-color: var(--ink-3); }
+.unit { display: flex; align-items: center; gap: 6px; }
+.unit span { font: 500 13px var(--f-mono); color: var(--ink-3); white-space: nowrap; }
+.mini { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; color: var(--ink-2); }
+
+.seg { display: flex; border: 1px solid var(--rule); border-radius: 5px; overflow: hidden; background: var(--sunk); }
+.seg label { flex: 1; position: relative; text-align: center; cursor: pointer; }
+.seg input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+.seg span { display: block; padding: 7px 6px; font-size: 13.5px; font-weight: 500; color: var(--ink-2); border-left: 1px solid var(--rule); }
+.seg label:first-child span { border-left: 0; }
+.seg input:checked + span { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: -3px; }
+.seg.stack { flex-direction: column; }
+.seg.stack span { text-align: left; padding: 8px 10px; border-left: 0; border-top: 1px solid var(--rule); }
+.seg.stack label:first-child span { border-top: 0; }
+.seg.stack b { display: block; font-weight: 600; }
+.seg.stack small { font-size: 12px; opacity: .85; font-weight: 400; }
+.check { display: flex; gap: 8px; align-items: flex-start; font-size: 13.5px; }
+.check input { margin-top: 3px; accent-color: var(--accent); }
+details.adv { border-top: 1px solid var(--rule); padding-top: 12px; }
+details.adv summary { cursor: pointer; font-weight: 600; font-size: 13.5px; }
+details.adv .inner { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+[hidden] { display: none !important; }
+
+/* ---------- datasheet ---------- */
+.sheet { background: var(--surface); border: 1px solid var(--rule); border-top: 5px solid var(--ink); border-radius: 0 0 6px 6px; padding: 22px 26px 28px; display: flex; flex-direction: column; gap: 26px; min-width: 0; }
+@media (max-width: 600px) { .sheet { padding: 18px 16px 22px; } }
+.titleblock { display: flex; flex-wrap: wrap; gap: 14px 24px; justify-content: space-between; align-items: flex-start; }
+.titleblock .kind { font: 600 13px/1 var(--f-display); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin-bottom: 8px; }
+h1 { font: 700 clamp(30px, 4.4vw, 46px)/0.98 var(--f-display); letter-spacing: .01em; text-transform: uppercase; text-wrap: balance; max-width: 18ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 0; margin-top: 12px; font: 500 13px var(--f-mono); color: var(--ink-2); }
+.meta span { padding-right: 12px; margin-right: 12px; border-right: 1px solid var(--rule); }
+.meta span:last-child { border: 0; }
+.stamp { border: 2px solid var(--ink); border-radius: 4px; padding: 10px 14px 10px 12px; display: flex; gap: 10px; align-items: center; max-width: 320px; background: var(--surface); }
+.stamp svg { flex: none; }
+.stamp b { display: block; font: 700 19px/1.05 var(--f-display); letter-spacing: .06em; text-transform: uppercase; }
+.stamp small { display: block; font-size: 12.5px; color: var(--ink-2); margin-top: 3px; line-height: 1.35; }
+.stamp.ok { border-color: var(--good); } .stamp.bad { border-color: var(--crit); } .stamp.busy { border-color: var(--ink-3); border-style: dashed; }
+.bar { height: 4px; background: var(--rule); border-radius: 2px; margin-top: 7px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--accent); }
+.lead { font-size: 16px; max-width: 72ch; }
+
+.sec > h2 { font: 600 15px/1 var(--f-display); letter-spacing: .14em; text-transform: uppercase; display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.sec > h2::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+.sec > h2 .tools { order: 3; }
+.sub { color: var(--ink-2); font-size: 13.5px; max-width: 75ch; margin: -6px 0 12px; }
+
+.notes { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.notes li { display: grid; grid-template-columns: 22px 1fr; gap: 10px; padding: 10px 12px; background: var(--sunk); border-left: 4px solid var(--ink-3); border-radius: 0 4px 4px 0; font-size: 14px; }
+.notes li b { font-weight: 600; }
+.notes li.crit { border-left-color: var(--crit); } .notes li.warn { border-left-color: var(--warn); } .notes li.tip { border-left-color: var(--accent); }
+.notes svg { margin-top: 2px; }
+
+.scroll { overflow-x: auto; }
+.scroll table { min-width: 540px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th { font: 600 12px/1.25 var(--f-display); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); text-align: left; padding: 6px 12px 6px 0; border-bottom: 1.5px solid var(--ink); vertical-align: bottom; white-space: nowrap; }
+td { padding: 7px 12px 7px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th.n, td.n { text-align: right; white-space: nowrap; }
+td.ref { font: 600 14px var(--f-mono); white-space: nowrap; }
+td.use { font-weight: 600; color: var(--ink); background: var(--accent-soft); padding-left: 10px; padding-right: 10px; }
+th.use { padding-left: 10px; padding-right: 10px; color: var(--ink); }
+td.dim { color: var(--ink-3); }
+.pill { display: inline-flex; align-items: center; gap: 5px; font: 600 11.5px/1 var(--f-display); letter-spacing: .08em; text-transform: uppercase; padding: 3px 7px 3px 5px; border-radius: 3px; border: 1px solid var(--rule); white-space: nowrap; vertical-align: 1px; }
+.pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); }
+.pill.ok i { background: var(--good); } .pill.bad i { background: var(--crit); border-radius: 1px; transform: rotate(45deg); }
+
+.btn { font: 600 13px/1 var(--f-body); color: var(--ink); background: var(--surface); border: 1px solid var(--ink-3); border-radius: 4px; padding: 7px 11px; cursor: pointer; white-space: nowrap; letter-spacing: 0; text-transform: none; }
+.btn:hover { border-color: var(--ink); background: var(--sunk); }
+
+.schem { background: var(--sunk); border: 1px solid var(--rule); border-radius: 4px; padding: 8px; }
+.schem svg { display: block; margin: 0 auto; max-width: none; }
+.schem .w { stroke: var(--ink); stroke-width: 1.6; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.schem .body { fill: var(--surface); }
+.schem .tl { fill: var(--accent-soft); }
+.schem .dot { fill: var(--ink); }
+.schem text { font: 600 12px var(--f-mono); fill: var(--ink); }
+.schem text.p { font: 600 12px var(--f-display); letter-spacing: .08em; text-transform: uppercase; fill: var(--ink-2); }
+.schem text.q { font: 500 11.5px var(--f-mono); fill: var(--ink-3); }
+.two-col { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--ink-2); margin-bottom: 6px; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.legend i { width: 18px; height: 0; border-top: 2.5px solid; }
+.legend i.dash { border-top-style: dashed; border-top-width: 2px; }
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; touch-action: pan-y; }
+.chart .grid-l { stroke: var(--rule); stroke-width: 1; }
+.chart .axis { stroke: var(--ink-3); stroke-width: 1; }
+.chart text { font: 500 11.5px var(--f-mono); fill: var(--ink-3); }
+.chart text.t { font: 600 11px var(--f-display); letter-spacing: .1em; text-transform: uppercase; fill: var(--ink-2); }
+.chart .band { fill: var(--accent); opacity: .09; }
+.chart .band-e { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 2 3; }
+.chart .spec { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 6 4; }
+.chart path.tr { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart path.tr.ghost { stroke-width: 1.4; stroke-dasharray: 5 4; opacity: .75; }
+.chart .cross { stroke: var(--ink-2); stroke-width: 1; }
+.chart circle.mk { stroke: var(--surface); stroke-width: 2; }
+.c1 { stroke: var(--s1); color: var(--s1); } .c2 { stroke: var(--s2); color: var(--s2); } .c3 { stroke: var(--s3); color: var(--s3); } .c4 { stroke: var(--s4); color: var(--s4); }
+circle.c1 { fill: var(--s1); } circle.c2 { fill: var(--s2); } circle.c3 { fill: var(--s3); } circle.c4 { fill: var(--s4); }
+.tip-box { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--ink-3); border-radius: 4px; padding: 7px 9px; font-size: 12.5px; box-shadow: 0 4px 14px rgba(0,0,0,.14); min-width: 150px; z-index: 2; }
+.tip-box b { display: block; font: 600 12.5px var(--f-mono); margin-bottom: 4px; }
+.tip-box div { display: flex; justify-content: space-between; gap: 14px; align-items: center; color: var(--ink-2); }
+.tip-box div span { display: inline-flex; align-items: center; gap: 6px; }
+.tip-box i { width: 10px; height: 0; border-top: 2.5px solid; }
+.tip-box div em { font: 500 12.5px var(--f-mono); font-style: normal; color: var(--ink); }
+.chart-opts { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 4px 0 2px; }
+
+.yield { display: grid; grid-template-columns: auto 1fr; gap: 6px 22px; align-items: center; }
+.yield .big { font: 700 54px/0.9 var(--f-display); letter-spacing: .01em; }
+.yield .big small { font-size: 22px; color: var(--ink-3); margin-left: 2px; }
+@media (max-width: 600px) { .yield { grid-template-columns: 1fr; } }
+
+.steps { list-style: none; counter-reset: st; display: flex; flex-direction: column; }
+.steps > li { counter-increment: st; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 0 10px; padding: 12px 0; border-bottom: 1px solid var(--rule); }
+.steps > li::before { content: counter(st); font: 700 22px/1 var(--f-display); color: var(--ink-3); }
+.steps h3 { font: 600 15px/1.3 var(--f-body); display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-bottom: 4px; }
+.steps p { color: var(--ink-2); max-width: 78ch; font-size: 14px; }
+.steps p + p { margin-top: 5px; }
+.eq { font: 500 13px/1.7 var(--f-mono); color: var(--ink); background: var(--sunk); border-radius: 4px; padding: 6px 10px; margin: 6px 0 2px; overflow-x: auto; white-space: nowrap; }
+.tag { font: 600 11px/1 var(--f-display); letter-spacing: .1em; text-transform: uppercase; padding: 3px 6px; border-radius: 3px; background: var(--accent-soft); color: var(--ink); }
+.tag.t2 { background: transparent; border: 1px solid var(--ink-3); }
+.fine { font-size: 13.5px; color: var(--ink-2); max-width: 80ch; }
+.fine ul { margin: 6px 0 0 18px; display: flex; flex-direction: column; gap: 4px; }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px 28px; }
+.cols h3 { font: 600 13px/1 var(--f-display); letter-spacing: .1em; text-transform: uppercase; margin-bottom: 6px; color: var(--ink); }
+.about { max-width: 1440px; margin: 0 auto; padding: 22px 24px 40px; border-top: 1px solid var(--rule); display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px 32px; font-size: 14px; color: var(--ink-2); }
+.about h2 { font: 600 13px/1 var(--f-display); letter-spacing: .12em; text-transform: uppercase; color: var(--ink); margin-bottom: 8px; }
+.about p { max-width: 60ch; }
+@media (max-width: 900px) { .about { padding: 18px 16px 32px; } }
+.err { padding: 14px; border: 2px solid var(--crit); border-radius: 4px; }
+@media (prefers-reduced-motion: no-preference) { .bar i { transition: width .15s linear; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">RF Coupler <span>Designer</span></div>
+  <p>Enter the band you need. Get part values or track sizes you can build, simulated across that band, with every number explained.</p>
+</header>
+
+<main class="grid">
+<form class="panel" id="form" autocomplete="off">
+  <h2>Your request</h2>
+
+  <fieldset class="fld">
+    <legend>Circuit</legend>
+    <div class="seg stack">
+      <label><input type="radio" name="circuit" id="c-wilk" value="wilkinson" checked><span><b>Wilkinson divider</b><small>Splits power in two, same phase, outputs isolated</small></span></label>
+      <label><input type="radio" name="circuit" id="c-bl" value="branchline"><span><b>Branch-line hybrid, 90°</b><small>Two equal outputs, 90° apart (quadrature)</small></span></label>
+      <label><input type="radio" name="circuit" id="c-rr" value="ratrace"><span><b>Rat-race hybrid, 180°</b><small>Sum and difference ports, outputs 0° or 180° apart</small></span></label>
+    </div>
+  </fieldset>
+
+  <fieldset class="fld">
+    <legend>Built with</legend>
+    <div class="seg">
+      <label><input type="radio" name="tech" id="t-l" value="lumped" checked><span>L and C parts</span></label>
+      <label><input type="radio" name="tech" id="t-ms" value="ms"><span>Microstrip</span></label>
+      <label><input type="radio" name="tech" id="t-sl" value="sl"><span>Stripline</span></label>
+    </div>
+  </fieldset>
+
+  <div class="fld">
+    <span class="lab">Frequency band</span>
+    <div class="row">
+      <input type="number" id="f1" value="10" min="0" step="any" aria-label="Band start" style="flex:1 1 60px">
+      <span class="hint">to</span>
+      <input type="number" id="f2" value="30" min="0" step="any" aria-label="Band end" style="flex:1 1 60px">
+      <select id="funit" aria-label="Frequency unit" style="flex:0 0 76px"><option>kHz</option><option selected>MHz</option><option>GHz</option></select>
+    </div>
+  </div>
+
+  <div class="row two">
+    <div class="fld"><label for="z0">System impedance</label><div class="unit"><input type="number" id="z0" value="50" min="1" step="any"><span>Ω</span></div></div>
+    <div class="fld"><label for="spec">Target</label><div class="unit"><input type="number" id="spec" value="15" min="3" max="40" step="1"><span>dB</span></div></div>
+  </div>
+  <p class="hint" style="margin-top:-12px">Target is the return loss and isolation you want across the whole band. 15 dB is a common student-lab figure, 20 dB is good.</p>
+
+  <fieldset class="fld" id="row-sections">
+    <legend>Sections</legend>
+    <div class="seg">
+      <label><input type="radio" name="sections" id="n1" value="1"><span>1</span></label>
+      <label><input type="radio" name="sections" id="n2" value="2" checked><span>2</span></label>
+      <label><input type="radio" name="sections" id="n3" value="3"><span>3</span></label>
+    </div>
+    <p class="hint">More sections cover a wider band, with more parts and a little more loss.</p>
+  </fieldset>
+
+  <div id="grp-lumped" class="fld" style="gap:14px">
+    <fieldset class="fld">
+      <legend>L-C cells per quarter-wave</legend>
+      <div class="seg">
+        <label><input type="radio" name="cells" id="m1" value="1" checked><span>1 (fewest parts)</span></label>
+        <label><input type="radio" name="cells" id="m2" value="2"><span>2 (wider band)</span></label>
+      </div>
+    </fieldset>
+    <label class="check"><input type="checkbox" id="opt" checked><span>Optimise the values for my band when the textbook formulas miss the target</span></label>
+  </div>
+
+  <div id="grp-board" class="fld" style="gap:12px" hidden>
+    <div class="fld" id="row-preset"><label for="preset">Board</label>
+      <select id="preset">
+        <option value="fr4-16">FR-4, 1.6 mm, 2-layer</option>
+        <option value="fr4-08">FR-4, 0.8 mm, 2-layer</option>
+        <option value="jlc4">JLCPCB 4-layer, outer layer (7628)</option>
+        <option value="ro4350">Rogers RO4350B, 0.508 mm</option>
+        <option value="custom">Custom</option>
+      </select></div>
+    <div class="row two">
+      <label class="mini">Dielectric constant εr<input type="number" id="er" value="4.4" min="1" step="any"></label>
+      <label class="mini">Loss tangent<input type="number" id="tand" value="0.02" min="0" step="any"></label>
+    </div>
+    <div class="row two">
+      <label class="mini" id="lab-h">Board thickness h (mm)<input type="number" id="h" value="1.6" min="0.01" step="any"></label>
+      <label class="mini" id="lab-b" hidden>Ground-to-ground spacing b (mm)<input type="number" id="b" value="1.6" min="0.01" step="any"></label>
+      <label class="mini">Copper thickness (mm)<input type="number" id="t" value="0.035" min="0" step="any"></label>
+    </div>
+    <label class="mini">Narrowest track your fab can make (mm)<input type="number" id="wmin" value="0.15" min="0.01" step="any"></label>
+  </div>
+
+  <details class="adv">
+    <summary>Parts and tolerances</summary>
+    <div class="inner">
+      <label class="mini" data-l>L and C values<select id="lcSeries"><option>E12</option><option selected>E24</option></select></label>
+      <label class="mini">Resistor values<select id="rSeries"><option selected>E24</option><option>E96</option></select></label>
+      <label class="mini" data-l>Inductor Q<input type="number" id="qL" value="40" min="1" step="any"></label>
+      <label class="mini" data-l>Capacitor Q<input type="number" id="qC" value="500" min="1" step="any"></label>
+      <label class="mini" data-l>Inductor tolerance ±%<input type="number" id="tolL" value="5" min="0" step="any"></label>
+      <label class="mini" data-l>Capacitor tolerance ±%<input type="number" id="tolC" value="5" min="0" step="any"></label>
+      <label class="mini">Resistor tolerance ±%<input type="number" id="tolR" value="1" min="0" step="any"></label>
+      <label class="mini" data-d>εr tolerance ±<input type="number" id="tolEr" value="0.2" min="0" step="any"></label>
+      <label class="mini" data-d>Track width tolerance ±%<input type="number" id="tolW" value="10" min="0" step="any"></label>
+    </div>
+  </details>
+</form>
+
+<article class="sheet" id="sheet" aria-live="polite"></article>
+</main>
+<footer class="about" id="about">
+  <div>
+    <h2>About</h2>
+    <p>Built by <b>Mohamed Bucheeri</b>, Communications and Networks Engineering, Bahrain Polytechnic. It started as a 10–30 MHz lumped Wilkinson divider whose textbook values failed at the top of the band, and grew into a tool that shows students why, and fixes it.</p>
+  </div>
+  <div>
+    <h2>Use it as a starting point</h2>
+    <p>Results come from circuit simulation of ideal and lossy models. Pads, junctions, connectors and part self-resonance are not modelled. Confirm the design in Qucs-S, Multisim or an EM simulator before you order boards or parts.</p>
+  </div>
+  <div>
+    <h2>Code</h2>
+    <p>Everything runs in your browser. Source and notes on <a href="https://github.com/mohamed-bucheeri/rf-coupler-designer">GitHub</a>.</p>
+  </div>
+</footer>
+
+<script>
+/*ENGINE*/
+</script>
+<script>
+/*UI*/
+</script>
+</body>
+</html>
