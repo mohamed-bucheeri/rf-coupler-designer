@@ -177,8 +177,9 @@ const RF = (() => {
       const a = dB(S, 2, 1), b = dB(S, 3, 1);
       return { s11: dB(S, 1, 1), s22: Math.max(dB(S, 2, 2), dB(S, 3, 3)), iso: dB(S, 3, 2), thru: a, coup: b, imb: Math.abs(a - b), phErr: Math.abs(wrap(ph(S, 2, 1) - ph(S, 3, 1))) };
     }
-    const a = dB(S, 2, 1), b = dB(S, 3, 1), target = circuit === 'branchline' ? 90 : 0;
-    return { s11: dB(S, 1, 1), s22: dB(S, 2, 2), iso: dB(S, 4, 1), thru: a, coup: b, imb: Math.abs(a - b), phErr: Math.abs(wrap(ph(S, 2, 1) - ph(S, 3, 1) - target)) };
+    const a = dB(S, 2, 1), b = dB(S, 3, 1), dph = wrap(ph(S, 2, 1) - ph(S, 3, 1));
+    const phErr = circuit === 'branchline' ? Math.abs(Math.abs(dph) - 90) : Math.abs(dph);
+    return { s11: dB(S, 1, 1), s22: dB(S, 2, 2), iso: dB(S, 4, 1), thru: a, coup: b, imb: Math.abs(a - b), phErr };
   }
   // how far a single frequency point is from the spec, in dB-like units. <= 0 means it passes.
   function violation(circuit, F, spec) {
@@ -279,6 +280,44 @@ const RF = (() => {
     return { Z, R, f0, info };
   }
 
+
+  /* ---------- branch-line prototype: N quarter-wave sections along each through line, N+1 branches ---------- */
+  // Symmetry: series section k equals section N-1-k, branch j equals branch N-j, top equals bottom.
+  const blGroups = N => ({ gs: k => Math.min(k, N - 1 - k), gb: j => Math.min(j, N - j), Gs: Math.ceil(N / 2), Gb: Math.floor(N / 2) + 1 });
+  function blNetIdeal(Zs, Zb, N, z0, f0) {
+    const g = blGroups(N), els = [], T = j => j + 1, B = j => N + 2 + j;
+    for (let k = 0; k < N; k++) { els.push({ t: 'TL', a: T(k), b: T(k + 1), z: Zs[g.gs(k)], th0: Math.PI / 2, f0 }); els.push({ t: 'TL', a: B(k), b: B(k + 1), z: Zs[g.gs(k)], th0: Math.PI / 2, f0 }); }
+    for (let j = 0; j <= N; j++) els.push({ t: 'TL', a: T(j), b: B(j), z: Zb[g.gb(j)], th0: Math.PI / 2, f0 });
+    return { n: 2 * N + 2, ports: [T(0), T(N), B(N), B(0)], z0, els };
+  }
+  const blCache = {};
+  function blPrototype(N, f1, f2, z0) {
+    if (N === 1) return { Zs: [z0 / Math.SQRT2], Zb: [z0], info: { method: 'formula' } };
+    const r = Math.max(f2 / f1, 1.15), key = N + '|' + r.toFixed(3);
+    if (!blCache[key]) {
+      const g = blGroups(N), fs = linspace(2 / (1 + r), 2 * r / (1 + r), 15);
+      const split = x => [Array.from(x.slice(0, g.Gs), Math.exp), Array.from(x.slice(g.Gs), Math.exp)];
+      const cost = x => {
+        const [Zs, Zb] = split(x), net = blNetIdeal(Zs, Zb, N, 1, 1); let w = -1e9;
+        for (const f of fs) { const F = figures('branchline', simulate(net, f)); w = Math.max(w, F.s11, F.iso, -40 + 36 * F.imb, -40 + 4 * F.phErr); }
+        // once the band is met with margin, prefer values close to the classic design
+        let pull = 0; for (let i = 0; i < x.length; i++) pull += (x[i] - lseed[i]) ** 2;
+        return Math.max(w, -35) + 3 * pull;
+      };
+      // seeds: three-branch closed form (series Z0, branches Z0(1+√2) and Z0·√2); four-branch rough start
+      const seed = N === 2 ? [1, 1 + Math.SQRT2, Math.SQRT2] : [1, 1, 2.8, 1.6], lseed = seed.map(Math.log);
+      const lo = [], hi = [];
+      for (let i = 0; i < g.Gs; i++) { lo.push(Math.log(0.4)); hi.push(Math.log(2.2)); }
+      for (let i = 0; i < g.Gb; i++) { lo.push(Math.log(0.6)); hi.push(Math.log(3.0)); }
+      const de = makeDE(cost, lo, hi, lseed, { pop: 30, seed: 21 });
+      for (let i = 0; i < 130; i++) de.step();
+      const [Zs, Zb] = split(de.best);
+      blCache[key] = { Zs, Zb, worst: de.bestVal, closed: N === 2 && r <= 1.15 };
+    }
+    const c = blCache[key];
+    return { Zs: c.Zs.map(v => v * z0), Zb: c.Zb.map(v => v * z0), info: { method: 'minimax', worst: c.worst } };
+  }
+
   /* ---------- E-series rounding ---------- */
   const E12 = [1, 1.2, 1.5, 1.8, 2.2, 2.7, 3.3, 3.9, 4.7, 5.6, 6.8, 8.2];
   const E24 = [1, 1.1, 1.2, 1.3, 1.5, 1.6, 1.8, 2, 2.2, 2.4, 2.7, 3, 3.3, 3.6, 3.9, 4.3, 4.7, 5.1, 5.6, 6.2, 6.8, 7.5, 8.2, 9.1];
@@ -337,23 +376,44 @@ const RF = (() => {
       }
       d.portNames = ['Input', 'Output 1', 'Output 2'];
     } else if (circuit === 'branchline') {
-      const Za = z0 / Math.SQRT2, Zb = z0; d.proto = { Za, Zb, f0 };
-      const arms = [[1, 2, 0], [2, 3, 1], [3, 4, 0], [4, 1, 1]];
+      const N = cfg.sections || 1, proto = blPrototype(N, cfg.f1, cfg.f2, z0), g = blGroups(N);
+      d.proto = Object.assign({ f0, N }, proto); d.N = N;
+      if (N === 1) { d.proto.Za = proto.Zs[0]; d.proto.Zb = proto.Zb[0]; }
+      const T = j => j + 1, B = j => N + 2 + j;
+      const sName = k => N === 1 ? 'through arms (ports 1-2 and 4-3)' : (2 * k === N - 1 ? `through-line section ${k + 1} (middle), top and bottom` : `through-line sections ${k + 1} and ${N - k}, top and bottom`);
+      const bName = j => N === 1 ? 'branch arms (ports 1-4 and 2-3)' : (2 * j === N ? `branch ${j + 1} (middle)` : `branches ${j + 1} and ${N + 1 - j}`);
+      const sCount = k => (2 * k === N - 1 ? 1 : 2) * 2, bCount = j => (2 * j === N ? 1 : 2);
       if (lumped) {
-        const iL = [P('L1', 'L', 'Series inductor in each through arm (ports 1-2 and 4-3)', 2 * m, cellL(Za)), P('L2', 'L', 'Series inductor in each branch arm (ports 1-4 and 2-3)', 2 * m, cellL(Zb))];
-        const iCn = P('C1', 'C', 'Shunt capacitor at each of the four corners', 4, cellC(Za) + cellC(Zb));
-        const iCi = m > 1 ? [P('C2', 'C', 'Shunt capacitor between the inductors of each through arm', 2 * (m - 1), 2 * cellC(Za)), P('C3', 'C', 'Shunt capacitor between the inductors of each branch arm', 2 * (m - 1), 2 * cellC(Zb))] : [];
-        d.n = 4 + 4 * (m - 1); d.ports = [1, 2, 3, 4];
+        const iLs = [], iLb = [], iCn = [], iCs = [], iCb = [];
+        for (let k = 0; k < g.Gs; k++) iLs.push(P(`L${k + 1}`, 'L', 'Series inductor, ' + sName(k), sCount(k) * m, cellL(proto.Zs[k])));
+        for (let j = 0; j < g.Gb; j++) iLb.push(P(`L${g.Gs + j + 1}`, 'L', 'Series inductor, ' + bName(j), bCount(j) * m, cellL(proto.Zb[j])));
+        for (let j = 0; j < g.Gb; j++) {
+          const v = cellC(proto.Zb[j]) + (j > 0 ? cellC(proto.Zs[g.gs(j - 1)]) : 0) + (j < N ? cellC(proto.Zs[g.gs(j)]) : 0);
+          iCn.push(P(`C${j + 1}`, 'C', N === 1 ? 'Shunt capacitor at each of the four corners' : `Shunt capacitor where ${2 * j === N ? `branch ${j + 1}` : `branches ${j + 1} and ${N + 1 - j}`} meet the through lines`, bCount(j) * 2, v));
+        }
+        if (m > 1) {
+          for (let k = 0; k < g.Gs; k++) iCs.push(P(`C${g.Gb + k + 1}`, 'C', 'Shunt capacitor between the inductors of ' + sName(k), sCount(k) * (m - 1), 2 * cellC(proto.Zs[k])));
+          for (let j = 0; j < g.Gb; j++) iCb.push(P(`C${g.Gb + g.Gs + j + 1}`, 'C', 'Shunt capacitor between the inductors of ' + bName(j), bCount(j) * (m - 1), 2 * cellC(proto.Zb[j])));
+        }
+        d.n = 2 * N + 2 + (3 * N + 1) * (m - 1); d.ports = [T(0), T(N), B(N), B(0)];
         structure = add => {
-          for (let c = 1; c <= 4; c++) add.C(c, 0, iCn);
-          arms.forEach(([a, b, g], ai) => { let prev = a; for (let c = 0; c < m; c++) { const nd = c === m - 1 ? b : 5 + ai * (m - 1) + c; add.L(prev, nd, iL[g]); if (c < m - 1) add.C(nd, 0, iCi[g]); prev = nd; } });
+          let next = 2 * N + 3;
+          const arm = (a, b, iL, iC) => { let prev = a; for (let c = 0; c < m; c++) { const nd = c === m - 1 ? b : next++; add.L(prev, nd, iL); if (c < m - 1) add.C(nd, 0, iC); prev = nd; } };
+          for (let j = 0; j <= N; j++) { add.C(T(j), 0, iCn[g.gb(j)]); add.C(B(j), 0, iCn[g.gb(j)]); }
+          for (let k = 0; k < N; k++) { arm(T(k), T(k + 1), iLs[g.gs(k)], iCs[g.gs(k)]); arm(B(k), B(k + 1), iLs[g.gs(k)], iCs[g.gs(k)]); }
+          for (let j = 0; j <= N; j++) arm(T(j), B(j), iLb[g.gb(j)], iCb[g.gb(j)]);
         };
       } else {
-        const iZ = [P('TL1', 'Z', 'Through arms (ports 1-2 and 4-3), quarter-wave', 2, Za, { theta: 90 }), P('TL2', 'Z', 'Branch arms (ports 1-4 and 2-3), quarter-wave', 2, Zb, { theta: 90 })];
-        d.n = 4; d.ports = [1, 2, 3, 4];
-        structure = add => arms.forEach(([a, b, g]) => add.TL(a, b, iZ[g], 90));
+        const iZs = [], iZb = [];
+        for (let k = 0; k < g.Gs; k++) iZs.push(P(`TL${k + 1}`, 'Z', 'Quarter-wave, ' + sName(k), sCount(k), proto.Zs[k], { theta: 90 }));
+        for (let j = 0; j < g.Gb; j++) iZb.push(P(`TL${g.Gs + j + 1}`, 'Z', 'Quarter-wave, ' + bName(j), bCount(j), proto.Zb[j], { theta: 90 }));
+        d.n = 2 * N + 2; d.ports = [T(0), T(N), B(N), B(0)];
+        structure = add => {
+          for (let k = 0; k < N; k++) { add.TL(T(k), T(k + 1), iZs[g.gs(k)], 90); add.TL(B(k), B(k + 1), iZs[g.gs(k)], 90); }
+          for (let j = 0; j <= N; j++) add.TL(T(j), B(j), iZb[g.gb(j)], 90);
+        };
       }
-      d.portNames = ['Input', 'Through (-90°)', 'Coupled (-180°)', 'Isolated'];
+      d.portNames = ['Input', 'Through', 'Coupled', 'Isolated'];
     } else {   // rat-race: ring order 2 - 1 - 3 - 4 - (three quarter-waves) - back to 2
       const Zr = Math.SQRT2 * z0; d.proto = { Zr, f0 };
       const arms = [[2, 1, 0], [1, 3, 1], [3, 4, 0]];
@@ -491,7 +551,7 @@ const RF = (() => {
     return { yield: pass / runs, p95, runs };
   }
 
-  return { stepE, refineRounded, monteCarlo, C0, simulate, dB, ph, wrap, figures, violation, bandSummary, linspace, makeDE, golden, rng,
+  return { blPrototype, blNetIdeal, stepE, refineRounded, monteCarlo, C0, simulate, dB, ph, wrap, figures, violation, bandSummary, linspace, makeDE, golden, rng,
     msAnalyze, msSynth, msEeffF, slExact, slAnalyze, slSynth, lineModel, lineEeff, lineAlpha,
     wilkPrototype, wilkNetIdeal, roundE, SERIES, makeDesign, makeOptimiser };
 })();

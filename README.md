@@ -11,7 +11,7 @@ Built by Mohamed Bucheeri, Communications and Networks Engineering, Bahrain Poly
 | Circuit | Built with |
 |---|---|
 | Wilkinson power divider, 1, 2 or 3 sections | L and C parts, microstrip, stripline |
-| Branch-line 90° hybrid | L and C parts, microstrip, stripline |
+| Branch-line 90° hybrid, 1, 2 or 3 sections (2, 3 or 4 branches) | L and C parts, microstrip, stripline |
 | Rat-race 180° hybrid | L and C parts, microstrip, stripline |
 
 For each design it shows:
@@ -32,6 +32,7 @@ The textbook way to make a lumped Wilkinson (replace each quarter-wave line with
 - **Simulator:** nodal admittance (Y-matrix) analysis of the whole circuit, giving full S-parameters at each frequency. Inductor and capacitor Q are included as series and parallel losses.
 - **Lines:** Hammerstad–Jensen microstrip model with Kirschning–Jansen dispersion and conductor and dielectric loss; Cohn's exact stripline formula, with Wheeler's finite-thickness correction.
 - **Multi-section Wilkinson:** line impedances by equal-ripple band search; two-section resistors from Cohn's closed-form design; three-section resistors by minimax search.
+- **Multi-section branch-line:** symmetric ladder of quarter-wave sections; impedances by minimax search over the band (match, isolation, amplitude balance, 90° phase), starting from the exact three-branch solution (Z₀, Z₀·(1+√2), Z₀·√2), with branches capped at 3·Z₀ so they stay buildable.
 - **Optimiser:** differential evolution, minimising the worst in-band return loss, isolation, amplitude imbalance and phase error.
 - **Standard values:** E12/E24/E96 rounding, then a neighbour search that keeps any swap improving the worst in-band point.
 
@@ -43,6 +44,7 @@ Everything runs in the browser. No server, no install.
 - Pozar's 50 Ω microstrip example (εr 2.2, h 1.27 mm): 3.91 mm.
 - Pozar's 50 Ω stripline example (εr 2.2, b 3.2 mm): 2.66 mm.
 - Steer's 400 MHz lumped Wilkinson: 28.13 nH, 5.627 pF, 100 Ω.
+- Three-branch coupler closed form at f₀: perfect match and isolation, 3.01 dB to each output, 90° apart.
 - A 10–30 MHz lumped Wilkinson built in Multisim, matching the calculator's AC sweep.
 
 ## Limits

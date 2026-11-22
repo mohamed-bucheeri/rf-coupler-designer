@@ -54,7 +54,10 @@
   }
   function syncForm() {
     const circuit = radio('circuit'), tech = radio('tech'), lumped = tech === 'lumped';
-    $('row-sections').hidden = circuit !== 'wilkinson';
+    $('row-sections').hidden = circuit === 'ratrace';
+    $('sec-hint').textContent = circuit === 'branchline'
+      ? 'Sections along each through line. 1 is the classic 4-arm square (2 branches), 2 adds a third branch, 3 a fourth. More sections cover a wider band but need very thin, high-impedance branches.'
+      : 'More sections cover a wider band, with more parts and a little more loss.';
     $('grp-lumped').hidden = !lumped; $('grp-board').hidden = lumped;
     $('lab-h').hidden = tech !== 'ms'; $('lab-b').hidden = tech !== 'sl'; $('row-preset').hidden = tech !== 'ms';
     document.querySelectorAll('[data-l]').forEach(e => e.hidden = !lumped);
@@ -205,18 +208,24 @@
       for (let k = 0; k < N; k++) { const x = xs + (k + 1) * m * cw; s.comp(x, yt, x, yb, 'res', 'R' + (k + 1), -1); }
       s.ext(0, yb + (lum ? 62 : 20));
     } else if (d.circuit === 'branchline') {
-      const S = lum ? 150 * m : 190, V = lum ? 120 * m : 150, x1 = 170, y1 = lum ? 82 : 46, x2 = x1 + S, y2 = y1 + V;
-      const side = (ax, ay, bx, by, ref, out, lab) => {
+      const N = d.N, Gs = Math.ceil(N / 2), Gb = Math.floor(N / 2) + 1, gs = k => Math.min(k, N - 1 - k), gb = j => Math.min(j, N - j);
+      const S = lum ? (N === 1 ? 150 : 132) * m : (N === 1 ? 190 : 150), V = lum ? 120 * m : 150, x1 = 170, y1 = lum ? 82 : 46, y2 = y1 + V, X = j => x1 + j * S;
+      const arm = (ax, ay, bx, by, ref, cref, out, lab) => {
         for (let c = 0; c < m; c++) {
           const px = ax + (bx - ax) * c / m, py = ay + (by - ay) * c / m, qx = ax + (bx - ax) * (c + 1) / m, qy = ay + (by - ay) * (c + 1) / m;
           s.comp(px, py, qx, qy, lum ? 'ind' : 'tl', (lum ? 'L' : 'TL') + ref, lab);
-          if (lum && c < m - 1) { s.shunt(qx, qy, out, 'cap', 'C' + (ref + 1)); s.dot(qx, qy); }
+          if (lum && c < m - 1) { s.shunt(qx, qy, out, 'cap', 'C' + cref); s.dot(qx, qy); }
         }
       };
-      side(x1, y1, x2, y1, 1, UP, 1); side(x1, y2, x2, y2, 1, DN, -1); side(x1, y1, x1, y2, 2, LT, 1); side(x2, y1, x2, y2, 2, RT, -1);
-      [[x1, y1, LT, UP, '1 Input'], [x2, y1, RT, UP, '2 Through'], [x2, y2, RT, DN, '3 Coupled'], [x1, y2, LT, DN, '4 Isolated']].forEach(([x, y, pd, cd, name]) => {
-        s.dot(x, y); s.port(x, y, pd, name); if (lum) s.shunt(x, y, cd, 'cap', 'C1');
-      });
+      for (let k = 0; k < N; k++) {
+        arm(X(k), y1, X(k + 1), y1, gs(k) + 1, Gb + gs(k) + 1, UP, 1);
+        arm(X(k), y2, X(k + 1), y2, gs(k) + 1, Gb + gs(k) + 1, DN, -1);
+      }
+      for (let j = 0; j <= N; j++) arm(X(j), y1, X(j), y2, Gs + gb(j) + 1, Gb + Gs + gb(j) + 1, j === N ? RT : LT, j === N ? -1 : 1);
+      for (let j = 0; j <= N; j++) {
+        [[y1, UP], [y2, DN]].forEach(([y, cd]) => { s.dot(X(j), y); if (lum) s.shunt(X(j), y, cd, 'cap', 'C' + (gb(j) + 1)); });
+      }
+      s.port(X(0), y1, LT, '1 Input'); s.port(X(N), y1, RT, '2 Through'); s.port(X(N), y2, RT, '3 Coupled'); s.port(X(0), y2, LT, '4 Isolated');
       s.ext(0, y2 + (lum ? 62 : 24));
     } else if (lum) {
       const A = 150 * m, y = 104, xn = [96, 96 + A, 96 + 2 * A, 96 + 3 * A], order = ['2 Output A', '1 Sum Σ', '3 Output B', '4 Diff Δ'];
@@ -286,23 +295,24 @@
   const TECH = { lumped: 'Lumped L-C', ms: 'Microstrip', sl: 'Stripline' };
   function title() {
     const { d } = st;
-    return d.circuit === 'wilkinson' ? (d.N > 1 ? d.N + '-section ' : '') + 'Wilkinson power divider' : d.circuit === 'branchline' ? 'Branch-line 90° hybrid' : 'Rat-race 180° hybrid';
+    return d.circuit === 'wilkinson' ? (d.N > 1 ? d.N + '-section ' : '') + 'Wilkinson power divider' : d.circuit === 'branchline' ? (d.N > 1 ? d.N + '-section branch-line 90° hybrid' : 'Branch-line 90° hybrid') : 'Rat-race 180° hybrid';
   }
   function notices() {
     const { d, cfg, spec, sum } = st, out = [], add = (lvl, html) => out.push({ lvl, html });
     const f0 = d.f0, ratio = cfg.f2 / cfg.f1, bw = 100 * (cfg.f2 - cfg.f1) / f0;
     if (!sum.use.pass && !st.busy) {
       const fixes = [];
-      if (d.circuit === 'wilkinson' && d.N < 3) fixes.push(`add a section (try ${d.N + 1})`);
+      if (d.circuit !== 'ratrace' && d.N < 3) fixes.push(`add a section (try ${d.N + 1})`);
       if (d.lumped && d.m === 1) fixes.push('use 2 L-C cells per quarter-wave');
       if (d.lumped && !cfg.optimise) fixes.push('turn the optimiser on');
       fixes.push('narrow the band', `accept a ${Math.max(3, Math.floor(spec.rl - sum.use.viol))} dB target`);
-      if (d.circuit !== 'wilkinson') fixes.push('for wide bands, use a multi-section or coupled-line coupler (not in this version)');
+      if (d.circuit === 'ratrace') fixes.push('for wide bands, use a coupled-line rat-race (not in this version)');
+      if (d.circuit === 'branchline' && d.N === 3) fixes.push('for very wide bands, use a coupled-line (Lange or tandem) coupler (not in this version)');
       add('crit', `<b>This design misses your ${spec.rl} dB target by ${sum.use.viol.toFixed(1)} dB.</b> The weakest point is ${st.worst.what}, ${st.worst.value} at ${fmtF(st.worst.f)}. To fix it you can: ${fixes.join('; ')}.`);
     }
     if (d.circuit !== 'wilkinson' && st.pass) {
       const w = 100 * (st.pass[1] - st.pass[0]) / f0;
-      add(sum.use.pass ? 'tip' : 'warn', `<b>Usable range: ${fmtF(st.pass[0])} to ${fmtF(st.pass[1])} (about ${num(w, 2)}% wide).</b> A single-section ${d.circuit === 'branchline' ? 'branch-line' : 'rat-race'} only works well close to its centre frequency. You asked for ${num(bw, 2)}%.`);
+      add(sum.use.pass ? 'tip' : 'warn', `<b>Usable range: ${fmtF(st.pass[0])} to ${fmtF(st.pass[1])} (about ${num(w, 2)}% wide).</b> ${d.circuit === 'ratrace' ? 'A single rat-race ring only works well close to its centre frequency.' : d.N === 1 ? 'A single-section branch-line only works well close to its centre frequency. Adding sections widens it.' : `A ${d.N}-section branch-line covers more than the classic one.`} You asked for ${num(bw, 2)}%.`);
     }
     if (d.lumped) {
       const vals = st.use;
@@ -342,13 +352,18 @@
         if (N === 2) S('Isolation resistors', tag('Formula') + ' ' + tag('Cohn 1968', 1), `<p>Two resistors share the job, so neither is simply 2·Z₀. Cohn’s closed-form design gives both from the line impedances and the bandwidth (z₁ = Z₂/Z₀ is the output-side line, z₂ = Z₁/Z₀ the input-side line):</p><div class="eq">φ = 90° · [1 − (1/√2)·(f₂/f₁ − 1)/(f₂/f₁ + 1)] = ${num(P.info.phi, 4)}°</div><div class="eq">r = 2·z₁·z₂ / √[(z₁+z₂)·(z₂ − z₁·cot²φ)] = ${num(P.R[0] / z0, 4)} &nbsp;→&nbsp; R1 = r·Z₀ = ${num(P.R[0], 4)} Ω &nbsp;(between the sections)</div><div class="eq">R2 = Z₀ · 2·r·(z₁+z₂) / [r·(z₁+z₂) − 2·z₂] = ${num(P.R[1], 4)} Ω &nbsp;(across the outputs)</div>`);
         else S('Isolation resistors', tag('Band search'), `<p>There is no closed formula for three resistors. Cohn himself had none. They were found by search: the three values that give the best worst-case output match and isolation across your band, with ideal lines.</p><div class="eq">${P.R.map((r, k) => `R${k + 1} = ${num(r, 4)} Ω`).join(' &nbsp;&nbsp; ')} &nbsp;&nbsp; (R${N} is across the outputs)</div>`);
       }
-    } else if (d.circuit === 'branchline') {
+    } else if (d.circuit === 'branchline' && d.N === 1) {
       S('Line impedances', tag('Formula'), `<p>A square of four quarter-wave lines. The two through arms are lower impedance than the system, the two branch arms equal it. That combination cancels the reflection at the input and at the isolated port.</p><div class="eq">Z(through) = Z₀ / √2 = ${num(d.proto.Za, 4)} Ω &nbsp;&nbsp; Z(branch) = Z₀ = ${num(d.proto.Zb, 4)} Ω</div>`);
+    } else if (d.circuit === 'branchline') {
+      const P = d.proto, N = d.N;
+      S('Ladder layout', tag('Structure'), `<p>Two through lines, each made of ${N} quarter-wave sections, joined by ${N + 1} quarter-wave branches. Each extra branch adds another path whose reflections cancel at a slightly different frequency, which is what widens the band.</p>`);
+      if (N === 2) S('Where the search starts', tag('Formula'), `<p>The three-branch coupler has an exact solution at f₀: through sections of Z₀, outer branches of Z₀·(1+√2) and a middle branch of Z₀·√2. It gives a perfect 3 dB, 90° split at the centre frequency.</p><div class="eq">Z(through) = ${num(z0)} Ω &nbsp;&nbsp; Z(outer branches) = ${num(z0 * (1 + Math.SQRT2), 4)} Ω &nbsp;&nbsp; Z(middle branch) = ${num(z0 * Math.SQRT2, 4)} Ω</div>`);
+      S('Line impedances for your band', tag('Band search'), `<p>There is no simple formula for ${N === 2 ? 'the widest-band' : 'a four-branch'} design, so the impedances were found by search with ideal lines: the set that gives the best worst-case input match, isolation, amplitude balance and 90° phase across ${band(cfg)}. Branches were capped at 3·Z₀ (${num(3 * z0)} Ω), because thinner tracks cannot be made reliably. Top and bottom, and left and right, stay symmetric.</p><div class="eq">${P.Zs.map((z, k) => `${'TL' + (k + 1)} (through) = ${num(z, 4)} Ω`).join(' &nbsp;&nbsp; ')}</div><div class="eq">${P.Zb.map((z, j) => `${'TL' + (P.Zs.length + j + 1)} (${j === 0 ? 'outer branches' : 2 * j === N ? 'middle branch' : 'inner branches'}) = ${num(z, 4)} Ω`).join(' &nbsp;&nbsp; ')}</div>${P.Zb.some(z => z >= 2.99 * z0) ? `<p>The branches hit the ${num(3 * z0)} Ω cap. With equal 3 dB coupling, a ${N}-section design wants even higher branch impedances, which is why designs with this many branches are rare.</p>` : ''}`);
     } else {
       S('Ring impedance', tag('Formula'), `<p>A ring one and a half wavelengths around. Three arms are a quarter-wave long and one is three quarter-waves. From the sum port the two paths to each output differ by nothing, and the two paths to the difference port differ by half a wavelength, so they cancel there.</p><div class="eq">Z(ring) = √2 · Z₀ = ${num(d.proto.Zr, 4)} Ω</div>`);
     }
     if (d.lumped) {
-      const zs = d.circuit === 'wilkinson' ? d.proto.Z.map((z, k) => [z, 'section ' + (k + 1)]) : d.circuit === 'branchline' ? [[d.proto.Za, 'through arm'], [d.proto.Zb, 'branch arm']] : [[d.proto.Zr, 'each arm']];
+      const zs = d.circuit === 'wilkinson' ? d.proto.Z.map((z, k) => [z, 'section ' + (k + 1)]) : d.circuit === 'branchline' ? (d.N === 1 ? [[d.proto.Za, 'through arm'], [d.proto.Zb, 'branch arm']] : d.proto.Zs.map((z, k) => [z, 'through section ' + (k + 1)]).concat(d.proto.Zb.map((z, j) => [z, 'branch ' + (j + 1)]))) : [[d.proto.Zr, 'each arm']];
       S('Swap each line for inductors and capacitors', tag('Formula'), `<p>A line of impedance Z and electrical length θ behaves, at f₀, exactly like one series inductor with a shunt capacitor at each end (a π-cell). Here θ = 90° / ${d.m} = ${num(th)}° per cell.</p><div class="eq">L = Z · sin θ / ω₀ &nbsp;&nbsp;&nbsp; C(each end) = tan(θ/2) / (ω₀ · Z)</div>${zs.map(([z, nm]) => `<div class="eq">${nm}: L = ${num(z, 4)} × ${num(Math.sin(th * Math.PI / 180), 4)} / ${sci(w0)} = ${fmtL(z * Math.sin(th * Math.PI / 180) / w0)} &nbsp;&nbsp; C = ${fmtC(Math.tan(th * Math.PI / 360) / (w0 * z))}</div>`).join('')}${d.circuit === 'ratrace' ? `<p>The 3λ/4 arm is replaced by a high-pass cell (a series capacitor of 1/(ω₀·Z) with shunt inductors), which gives the same phase with one part. ${d.m === 1 ? 'Its shunt inductors resonate with the shunt capacitors at ports 2 and 4, so both are left out.' : 'Its shunt inductors combine with the shunt capacitors at ports 2 and 4 into one inductor each (L3).'}</p>` : ''}`);
       S('Add up capacitors that share a node', tag('Formula'), `<p>Capacitors to ground at the same point are in parallel, so their values add. That is why the parts list has fewer capacitors than the cell count suggests.</p><div class="eq">${d.params.map((p, i) => p.kind === 'C' ? `${p.des} = ${fmtC(st.formula[i])}` : null).filter(Boolean).join(' &nbsp;&nbsp; ')}</div>`);
       S('Test the formula values across your band', tag('Simulation'), `<p>The circuit was simulated at 41 frequencies from ${band(cfg)} with ideal parts. Worst input match ${dBs(sum.formula.s11)} dB, worst isolation ${dBs(sum.formula.iso)} dB. ${sum.formula.pass ? 'That meets your target, so the formula values are kept.' : `That misses your ${spec.rl} dB target.`} The formulas are exact only at f₀: the π-cells are a low-pass filter with cutoff at ${fmtF(d.cutoff)}.</p>`);
